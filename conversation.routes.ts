@@ -1,33 +1,65 @@
-import { UserID } from '../users/user.model';
+import { Response, Router } from 'express';
+import { PaginatedResult } from '../common/common.model';
+import { Conversation } from './conversation.model';
+import { listConversations } from './conversation.service';
+import { listMessagesForConversation } from './message.service';
+import { validateParams, validateQuery } from '../middlewares/schema-validator';
+import { PaginationParams, paginationParamsSchema } from '../middlewares/paging.validator';
+import { ConversationParams, conversationParamsSchema } from './conversation.validator';
+import { AuthenticatedRequest, authGuard } from '../middlewares/auth.guard';
+import { requirePermissions } from '../middlewares/require-permissions';
+import { Permissions } from '../utils/permissions';
+// début temp - Test notification Telegram
+import { Message } from './conversation.model';
+import { sendNotification } from './notification.service';
+// fin temp
 
-export type ISODateTime = string; // e.g. "2026-07-03T10:30:00Z"
+const conversationRoutes = Router();
 
-export interface Address {
-  line1: string;
-  line2?: string;
-  postalCode: string;
-  city: string;
-  country: string;
-}
+conversationRoutes.use(authGuard);
 
-export interface AuditFields {
-  createdAt: ISODateTime;
-  updatedAt: ISODateTime;
-  createdById?: UserID;
-  updatedById?: UserID;
-}
+conversationRoutes.get(
+  '/',
+  requirePermissions([Permissions.READ_DATA]),
+  validateQuery(paginationParamsSchema),
+  async (request: AuthenticatedRequest, response: Response) => {
+    const paginationParams = request.parsedQuery as PaginationParams;
+    const conversations: PaginatedResult<Conversation> = await listConversations(paginationParams);
+    response.status(200).json(conversations);
+  }
+);
 
-export interface PaginationParams {
-  query?: string;
-  limit: number;
-  offset: number;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
-}
+conversationRoutes.get(
+  '/:conversationId/messages',
+  requirePermissions([Permissions.READ_DATA]),
+  validateParams(conversationParamsSchema),
+  validateQuery(paginationParamsSchema),
+  async (request: AuthenticatedRequest, response: Response) => {
+    const { conversationId } = request.parsedParams as ConversationParams;
+    const paginationParams = request.parsedQuery as PaginationParams;
+    const messages = await listMessagesForConversation(conversationId, paginationParams);
+    response.status(200).json(messages);
+  }
+);
 
-export interface PaginatedResult<T> {
-  items: T[];
-  total: number;
-  limit: number;
-  offset: number;
-}
+// début temp - Test notification Telegram
+conversationRoutes.post(
+    '/test-notification',
+    requirePermissions([Permissions.READ_DATA]),
+    async (request: AuthenticatedRequest, response: Response) => {
+        const testMessage: Message = {
+            id: 'id_test',
+            relatedToConversationId: 'conversationId_test',
+            fromMemberId: 'memberId_test',
+            content: [{ text: 'Message de test qui test' }],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        await sendNotification(testMessage, 'test-conversation-id');
+        response.status(200).json({ message: 'Notification envoyée' });
+    },
+);
+// fin temp
+
+export default conversationRoutes;
